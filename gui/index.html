@@ -1,0 +1,299 @@
+<!-- 
+ 
+マイコンを直感的に遠隔操作するためのGUIです．
+ゲームのような感覚で機体を制御できます．
+
+使い方：
+1. index.htmlと，start_gui.pyを使用したい場所にコピーします．
+2. start_gui.pyを実行します．
+3. 自動的にサーバーが立ち上げられます．
+4. ↑の操作をした機器と同じWi-Fiに繋いでいる機器で， http://ローカルIPアドレス:8000 にアクセスします．
+
+camera.jpgを別のプログラムから変更することで，ブラウザに表示される画像を更新できます
+data_to_browserを別のプログラムから変更することで，ブラウザ上にモーターの出力などを表示できます
+ブラウザでの操作は，自動的にdata_from_browserに記録されます．
+
+
+GUI中で地理院地図を使用しているため，マップの組織外への頒布は行わないでください．
+-->
+
+<!DOCTYPE html>
+<html lang="jp">
+    <head>
+        <meta charset="utf-8" />
+        <title>CanSat Remote Controler</title>
+        <meta name="author" content="Akatoki Saidai" />
+        <meta name="description" content="ラズベリーPiなどのマイコンを使ったロボットを遠隔操作するためのGUIです"/>
+    </head>
+    <body
+        style="text-align: center; background-color: black; overflow: hidden; touch-action: none; user-select: none;">
+
+        <!-- カメラで撮影した動画 -->
+        <img id="cameraImage" src="camera.jpg" alt="No Video" 
+        style="height: 100dvh; aspect-ratio: 4/3; color: white; font-size: 50px;" />
+
+        <!-- 機体の傾きのアイコン -->
+        <svg id="backTiltIcon" class="tiltIcon" width="30px" height="30px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-labelledby="carAltIconTitle" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="miter" color="#ffffff"
+            style="position: fixed; top: 20px; right: 40px;">
+            <title id="carIconTitle">Tilt from back</title> <path d="M5 11L7 5H17L19 11M5 11H19M5 11V17M19 11V17M5 17V19H6V17M5 17H6M19 17V19H18V17M19 17H18M6 17H18"/> <circle cx="8" cy="14" r="1"/> <circle cx="16" cy="14" r="1"/>
+        </svg>
+        <svg id="sideTiltIcon" class="tiltIcon" width="30px" height="30px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-labelledby="carAltIconTitle" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="miter" color="#ffffff"
+            style="position: fixed; top: 60px; right: 40px;">
+            <title id="carAltIconTitle">Tilt from side</title> <path d="M3 12L5 7H7M3 12H2V17H3M3 12H7M18 12L16 7H12M18 12H20C21.1046 12 22 12.8954 22 14V17H20M18 12H12M7 17H16M7 7V12M7 7H12M7 12H12M12 12V7"/> <circle cx="5" cy="17" r="2"/> <circle cx="18" cy="17" r="2"/>
+        </svg>
+
+        <!-- マップ -->
+        <div id="fieldMapOuter" style="position: fixed; top: 5px; left: 50px; border-radius: 50%; width: 150px; height: 150px; border: 5px solid brown; overflow: hidden; background-color: rgb(233, 204, 109); text-align:center;">
+            <div id="joinedMap" style="position:absolute; left:-75px; top:-75px; transform:translate(-75px, -75px);">
+                <img id="mapImage0" class="mapImage" style="left:  0px; top:  0px;" /> <img id="mapImage1" class="mapImage" style="left:150px; top:  0px;" /> <img id="mapImage2" class="mapImage" style="left:300px; top:  0px;" />
+                <img id="mapImage3" class="mapImage" style="left:  0px; top:150px;" /> <img id="mapImage4" class="mapImage" style="left:150px; top:150px;" /> <img id="mapImage5" class="mapImage" style="left:300px; top:150px;" />
+                <img id="mapImage6" class="mapImage" style="left:  0px; top:300px;" /> <img id="mapImage7" class="mapImage" style="left:150px; top:300px;" /> <img id="mapImage8" class="mapImage" style="left:300px; top:300px;" />
+            </div>
+            <style>.mapImage{position:absolute; width:150px; height:150px;}</style>
+            <span style="color:rgb(81, 47, 8); font-size:50px; font-family:sans-serif;">No Map</span>
+            <svg id="fieldMapArray" width="20px" height="20px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="position:absolute; top:65px; left:65px;">
+                <path d="M3.16496 19.5025L10.5275 2.99281C11.1178 1.66906 12.8822 1.66906 13.4725 2.99281L20.835 19.5025C21.5021 20.9984 20.0209 22.5499 18.6331 21.809L12.7294 18.657C12.2702 18.4118 11.7298 18.4118 11.2706 18.657L5.36689 21.809C3.97914 22.5499 2.49789 20.9984 3.16496 19.5025Z" style="fill:#10008d;"/>
+            </svg>
+            <span style="position: absolute; height:18px; width:15px; top:-5px; left:67.5px; font-size:15px; font-family:sans-serif; border-radius:50%; background-color:brown; color:rgb(233, 204, 109);">N</span>
+        </div>
+        <a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener noreferrer"
+            style="position: fixed; top: 165px; left: 70px; width:120px; font-size:8px; color:brown;">出典：地理院地図</a>
+
+        <!-- モーター出力の棒グラフ -->
+        <div id="motorPowerBarField"
+            style="position: fixed; top: 5px; right: 90px; height: 180px; width: 100px;">
+            <input id="motorLeftPowerBar" class="motorPowerBar" value=0 type="range" min="-1" max="1" step="0.001"
+                style="position: absolute; top: 40%; right: 0px;"/>
+            <input id="motorRightPowerBar" class="motorPowerBar" value=0 type="range" min="-1" max="1" step="0.001"
+                style="position: absolute; top: 40%; right: -50px;"/>
+            <style>
+                .motorPowerBar{transform:rotate(-90deg);-webkit-appearance: none; appearance: none; height: 25px; width: 150px; background-color: gray; outline: none; opacity: 0.7; -webkit-transition: .2s; transition: opacity .2s;}
+                .motorPowerBar:hover{opacity: 1; transform: routate(-90deg);}
+                .motorPowerBar::-webkit-slider-thumb{-webkit-appearance: none; appearance: none; width: 5px; height: 25px; background-color: #04AA6D; cursor: pointer; border-radius: 10%; visibility: hidden;}
+                .motorPowerBar::-moz-range-thumb{width: 5px; height: 25px; background-color: #04AA6D; cursor: pointer; border-radius: 10%; visibility: hidden;}
+            </style>
+        </div>
+
+        <!-- ライトとブザーを操作するためのボタン -->
+        <div id="inputButtonField" 
+            style="position: fixed; bottom: 5px; right: 5px; margin: 10px 30px; width: 150px; height: 150px;">
+            <button class="inputButton" id="lightButton" type="button" 
+                style="position: absolute; top: 0; right: 0">
+                <svg role="img" xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 24 24" aria-labelledby="lightBulbIconTitle" aria-hidden="true" focusable="false">
+                    <title id="lightBulbIconTitle">Turn on the light</title>
+                    <path d="M16 12C15.3333333 12.6666667 15 14 15 16L15 17 9 17 9 16C9 14 8.66666667 12.6666667 8 12 5.6739597 9.6739597 5.41421356 6.10050506 7.75735931 3.75735931 10.1005051 1.41421356 13.8994949 1.41421356 16.2426407 3.75735931 18.5857864 6.10050506 18.4068484 9.59315157 16 12zM10 21L14 21"></path>
+                </svg> <span style="display:none;">Light icon</span>
+            </button>
+            <button class="inputButton" id="buzzerButton" type="button" 
+                style="position: absolute; bottom: 0; left: 0;">
+                <svg role="img" xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 24 24" aria-labelledby="volumeLoudIconTitle">
+                    <title id="volumeLoudIconTitle">Play sound</title> <path d="M13 5v14l-5-4H3V9h5z"></path> <path stroke-linecap="round" d="M13 14c1.5-1 1.5-3 0-4"></path> <path d="M16 16C18.0858253 13.9141747 18.0858253 10.0858253 16 8M18 19C21.98552 15.01448 22.0076803 9.00768033 18 5"></path>
+                </svg>
+            </button>
+            <style>
+                .inputButton{-webkit-appearance:none; -moz-appearance:none; appearance:none; border:0; background-color:rgba(50,50,50,0.2); fill:white; cursor:pointer; display:inline-block; vertical-align:middle; width: 60px; height: 60px; border-radius: 50%;}
+                .inputButton:hover{background: rgba(50,50,50,0.5);}
+                .inputButton:focus{outline:none; box-shadow: 0 0 0 4px #64ffff;}
+                .inputButton:disabled{fill:#c8c8c8; background:rgba(120,120,130,0.8); cursor:not-allowed;}
+            </style>
+        </div>
+
+        <!-- 機体を移動させるためのスティックのようなもの -->
+        <div id="movingStick"
+            style="position: fixed; bottom: 20px; left: 40px;">
+            <div id="movingStickFrame"
+                style="width: 160px; height: 160px; visibility: hidden; border-radius: 50%; border: 3px solid white;"></div>
+            <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" id="movingStickKnob"
+                style="position: absolute; top: 60px; left: 60px; border-radius: 50%; border: 2px solid white; width: 40px; height: 40px; touch-action: auto;">
+                <title/><g data-name="25-Arrow-direction-pointer" id="_25-Arrow-direction-pointer"><polygon points="31 16 25 11 25 14 18 14 18 7 21 7 16 1 11 7 14 7 14 14 7 14 7 11 1 16 7 21 7 18 14 18 14 25 11 25 16 31 21 25 18 25 18 18 25 18 25 21 31 16" style="fill:none;stroke:#ffffff;stroke-linecap:round;stroke-linejoin:round;stroke-width:2px"/></g>
+            </svg>
+        </div>
+    </body>
+
+    <script>
+        var data_from_server;  // マイコンから受信したデータ
+        var motorL = 0;  // モーターLの出力
+        var motorR = 0;  // モーターRの出力
+        var light = false;  // ライトのon/off
+        var buzzer = false;  // ブザーのon/off
+        var stickClicking = false;  // 移動方向の制御用のスティック(?)を今クリックしているか
+
+        // モーターの値を設定，それに合わせてスティックと棒グラフを動かす
+        function setMotor(new_ml, new_mr) {
+            motorL = new_ml;
+            motorR = new_mr;
+            const motorLeftPowerBar = document.getElementById("motorLeftPowerBar");
+            const motorRightPowerBar = document.getElementById("motorRightPowerBar");
+            motorLeftPowerBar.value = motorL;
+            motorRightPowerBar.value = motorR;
+            motorLeftPowerBar.style.background = (0<=motorL ? `linear-gradient(to right, gray 50%, red 50%, red ${motorL*50+50}% ,gray ${motorL*50+50}%)` : `linear-gradient(to right, gray ${motorL*50+50}% ,blue ${motorL*50+50}%, blue 50%, gray 50%)`);
+            motorRightPowerBar.style.background = (0<=motorR ? `linear-gradient(to right, gray 50%, red 50%, red ${motorR*50+50}% ,gray ${motorR*50+50}%)` : `linear-gradient(to right, gray ${motorR*50+50}% ,blue ${motorR*50+50}%, blue 50%, gray 50%)`);
+
+            const movingStickKnob = document.getElementById("movingStickKnob");
+            movingStickKnob.style.transform = `translate(${(motorL - motorR)*40}px, ${- (motorL + motorR)*40}px)`;
+        }
+
+        // タッチに合わせて棒グラフの値を動かす
+        document.getElementById("motorLeftPowerBar").addEventListener("pointerdown", e => {stickClicking = true;});
+        document.getElementById("motorRightPowerBar").addEventListener("pointerdown", e => {stickClicking = true;});
+        document.getElementById("motorLeftPowerBar").addEventListener("pointermove", e => {if(e.buttons) {setMotor(e.target.value, motorR);}});
+        document.getElementById("motorRightPowerBar").addEventListener("pointermove", e => {if(e.buttons) {setMotor(motorL, e.target.value);}});
+        document.getElementById("motorLeftPowerBar").addEventListener("pointerup", e => {stickClicking = false;});
+        document.getElementById("motorRightPowerBar").addEventListener("pointerup", e => {stickClicking = false;});
+
+        // タッチに合わせて，スティックを動かす
+        const movingStickKnob = document.getElementById("movingStickKnob");
+        movingStickKnob.addEventListener("pointerdown", (e) => {
+            stickClicking = true;
+            movingStickKnob.setPointerCapture(e.pointerId);
+        });
+        const movingStick = document.getElementById("movingStick");
+        movingStickKnob.addEventListener("pointermove", (e) => {
+            if (e.buttons) {
+                stickClicking = true;
+                if (motorL*motorL + motorR*motorR <= 2) {
+                    const rect = movingStick.getBoundingClientRect();
+                    setMotor((e.clientX - rect.left - e.clientY + rect.top)/160*1.5, (-e.clientX + rect.left - e.clientY + rect.top)/160*1.5 + 1.5);
+                } else {
+                    setMotor(motorL * 0.99, motorR * 0.99);
+                }
+            } else {
+                stickClicking = false;
+            }
+            document.getElementById("movingStickFrame").style.visibility = (motorL*motorL + motorR*motorR > 1.8 ? "visible" : "hidden");
+        });
+        movingStickKnob.addEventListener("pointerup", (e) => {
+            stickClicking = false;
+            document.getElementById("movingStickFrame").style.visibility = "hidden";
+            movingStickKnob.releasePointerCapture(e.pointerId);
+        });
+        movingStickKnob.addEventListener("pointerleave", () => {
+            stickClicking = false;
+        });
+
+        // buttonをクリックしたときの動作
+        var lightForceOn = false;
+        function setLight(new_light) {
+            if (lightForceOn) {new_light = true;}
+            light = new_light;
+            lightButton = document.getElementById("lightButton");
+            lightButton.style.boxShadow = (light ? "0 0 0 4px #64ffff" : "none");
+            lightButton.style.fill = (light ? "#64ffff" : "white");
+        }
+        document.getElementById("lightButton").addEventListener("click", () => {
+            lightForceOn = (!light)
+            setLight(!light)
+            sendData();
+            setTimeout(()=>{lightForceOn = false;}, 1000);
+        });
+        var buzzerForceOn = false;
+        function setBuzzer(new_buzzer) {
+            if (buzzerForceOn) {new_buzzer = true;}
+            buzzer = new_buzzer;
+            buzzerButton = document.getElementById("buzzerButton");
+            buzzerButton.style.boxShadow = (buzzer ? "0 0 0 4px #64ffff" : "none");
+            buzzerButton.style.fill = (buzzer ? "#64ffff" : "white");
+        }
+        document.getElementById("buzzerButton").addEventListener("click", () => {
+            buzzerForceOn = (!buzzer);
+            setBuzzer(!buzzer);
+            sendData();
+            setTimeout(()=>{buzzerForceOn = false;}, 1000);
+        });
+        
+        // マップのセットアップ
+        var lat = 35.861270, lon = 139.607517, mapX = 0, mapY = 0;
+        const mapScale = 16;  // マップの縮尺
+        var mapLoadable = true;
+        function updateMap(newLat, newLon) {
+            if (newLat === null || newLon === null) {
+                newLat = lat, newLon = lon;
+            }
+            const unit = 2 * 6378137 * Math.PI / Math.pow(2, mapScale);
+            let newX = ((newLon * 20037508.34 / 180.0) + (6378137 * Math.PI)) / unit;
+            let newY = ((6378137 * Math.PI) - (Math.log(Math.tan((90.0 + newLat) * Math.PI / 360.0)) * 20037508.34 / Math.PI)) / unit;
+
+            // const mainURL = "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png" // ベースマップ
+            const mainURL = "https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg"  // 写真
+            if (mapLoadable) {
+                if (Math.floor(mapX)!==Math.floor(newX) || Math.floor(mapY)!==Math.floor(newY)) {
+                    for (i=0; i<3; ++i) {
+                        for (j=0; j<3; ++j) {
+                            document.getElementById("mapImage" + (3*i + j)).src = mainURL.replace("{z}", mapScale).replace("{x}", Math.floor(newX) + j -1).replace("{y}", Math.floor(newY) + i -1);
+                        }
+                    }
+                    mapLoadable = false;
+                    setTimeout(()=>{mapLoadable=true;}, 5000);
+                }
+            }
+            document.getElementById("joinedMap").style.transform = `translate(${-(newX - Math.floor(newX))*150}px, ${-(newY - Math.floor(newY))*150}px)`;
+            lat = newLat, lon = newLon, mapX = newX, mapY = newY;
+
+            // 矢印を回転
+            const mag_front = data_from_server.mag[0], mag_left = data_from_server.mag[1], mag_top = data_from_server.mag[2];
+            if (mag_front !== null && mag_left !== null) {
+                document.getElementById("fieldMapArray").style.transform = `rotate(${-1 * Math.atan2(mag_left, mag_front)}rad)`;
+            }
+        }
+
+        // 傾きアイコンの制御
+        function updateTiltIcon() {
+            const grav_front = data_from_server.grav[0], grav_left = data_from_server.grav[1], grav_top = data_from_server.grav[2];
+            if (grav_front !== null && grav_left !== null && grav_top !== null) {
+                document.getElementById("backTiltIcon").style.transform = `rotate(${Math.atan2(grav_top, grav_left)*180/Math.PI - 90}deg)`;
+                document.getElementById("sideTiltIcon").style.transform = `rotate(${Math.atan2(grav_top, grav_front)*180/Math.PI - 90}deg)`;
+            }
+        }
+
+        // 受信したデータをもとに表示を更新
+        function updataData(data) {
+            data_from_server = data;
+            if(!stickClicking) {
+                setMotor(data_from_server.motor_l, data_from_server.motor_r);
+            }
+            setLight(data_from_server.light);
+            setBuzzer(data_from_server.buzzer);
+            updateMap(data_from_server.lat, data_from_server.lon);
+            updateTiltIcon();
+        }
+
+        // モーター出力などのデータをマイコンから定期的に読み込む
+        function loadData() {
+            fetch(`./data_to_browser?ver=${new Date().getTime()}`)
+            .then(response => {if (!response.ok) {throw new Error("Network response is not ok");}  return response.json();} )
+            .then(data => {console.log(data); updataData(data);} )
+            .catch(error => {console.error("There was a problem with the fetch operation", error);} );
+        }
+        setInterval(loadData, 500);
+
+        // マイコンにデータを送信したあと受信する
+        function sendData() {
+            data_to_server = {motor_l: (motorL<-1 ? -1 : (motorL>1 ? 1 : motorL)), motor_r: (motorR<-1 ? -1 : (motorR>1 ? 1 : motorR)), light: light, buzzer: buzzer};
+            fetch(data_from_server.local_ip, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(data_to_server)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error("Network response was not ok");
+                }
+                return response.json();
+            })
+            .then(responceData => {
+                console.log("Success:", responceData);
+                updataData(responceData);
+            })
+            .catch(error => {
+                console.error("There was a problem with the fetch operation", error);
+            });
+        }
+        setInterval(sendData, 500);
+
+        // カメラで撮影した写真を定期的に読み込む
+        setInterval(() => {document.getElementById("cameraImage").src = `./camera.jpg?ver=${new Date().getTime()}`}, 500);
+
+        // タッチしていないとき，スティックの位置を中心に戻す
+        setInterval(() => {if (!stickClicking) {setMotor(motorL - (motorL - data_from_server.motor_l)/10, motorR - (motorR - data_from_server.motor_r)/10);} }, 10);
+    </script>
+</html>
