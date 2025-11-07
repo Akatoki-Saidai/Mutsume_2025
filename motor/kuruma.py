@@ -5,10 +5,10 @@ from time import sleep
 from gpiozero.pins.pigpio import PiGPIOFactory
 
 # DCモータのピン設定
-PIN_AIN1 = 18
+PIN_AIN1 = 4
 PIN_AIN2 = 23
-PIN_BIN1 = 24
-PIN_BIN2 = 13
+PIN_BIN1 = 13
+PIN_BIN2 = 5
 
 dcm_pins = {
     "left_forward": PIN_AIN2,
