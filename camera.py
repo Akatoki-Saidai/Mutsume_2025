@@ -1,6 +1,6 @@
 from picamera2 import Picamera2
 import os
-logger.info('カメラのセットアップを開始しました')
+print('カメラのセットアップを開始しました')
 
 picam2 = Picamera2()
 picam_config = picam2.create_preview_configuration()
