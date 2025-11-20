@@ -137,7 +137,6 @@ logger.info('モーターのセットアップが完了しました')
 
 logger.info('スピーカーのセットアップを開始しました')
 
-proces_aplay = C()
 # .poll()は終了していなかったらNone，終了していたらそのステータスを返す．
 def audio_play(audio_path):
     global proces_aplay
