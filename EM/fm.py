@@ -1,10 +1,10 @@
-# むつめ祭2024にて機体を遠隔操作するためのプログラムです
+# むつめ祭2025にて機体を遠隔操作するためのプログラムです
 
 # 必ず仮想環境で実行してください
 # 仮想環境の作成：sudo python -m venv fm_env --system-site-packages
 # 仮想環境に入る：source fm_env/bin/activate
 
-# スピーカー設定をPWM出力可能にしておく(/boot/firmware/config.txtの末尾に"dtoverlay=audremap,pins_18_19"を追加)
+# スピーカー設定をPWM出力可能にしておく(/boot/firmware/config.txtの末尾に"dtoverlay=audremap,pins_12_13"を追加)
 
 import json
 from logging import getLogger, StreamHandler, Formatter, Logger, DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -63,7 +63,6 @@ logger.info('ライブラリをインポートしています')
 # from gpiozero import LED
 from gpiozero import Motor
 from gpiozero.pins.pigpio import PiGPIOFactory
-import libcamera
 from picamera2 import Picamera2
 from pyPS4Controller.controller import Controller
 logger.info('ライブラリのインポートが完了しました')
@@ -76,10 +75,11 @@ logger.info('別のPythonファイルの読み込みが完了しました')
 ##### モーター #####
 logger.info('モーターのセットアップを開始します')
 
-PIN_R1 = 4
-PIN_R2 = 23
-PIN_L1 = 26
-PIN_L2 = 5
+# ピン番号要確認
+PIN_R1 = 2
+PIN_R2 = 3
+PIN_L1 = 17
+PIN_L2 = 27
 motor_right = Motor(forward = PIN_R1, backward = PIN_R2, pin_factory = PiGPIOFactory())
 motor_left  = Motor(forward = PIN_L1, backward = PIN_L2, pin_factory = PiGPIOFactory())
 
@@ -133,30 +133,16 @@ def motor_calib():
 
 logger.info('モーターのセットアップが完了しました')
 
-
-##### ライト #####
-logger.info('ライトのセットアップを開始します')
-
-# high_power_led = LED(17)
-# high_power_led.off()
-logger.warning('<<警告>>\n今回のむつめ祭ではライトの使用を取りやめました')
-
-logger.info('ライトのセットアップが完了しました')
-
-
 ##### スピーカー #####
 
 logger.info('スピーカーのセットアップを開始しました')
-class C():
-    def poll(self):
-        return 0  # まだ開始していない
 
 proces_aplay = C()
 # .poll()は終了していなかったらNone，終了していたらそのステータスを返す．
 def audio_play(audio_path):
     global proces_aplay
     logger.debug('audio_path: %s', audio_path)
-    if (proces_aplay.poll() != None):
+    if (proces_aplay is None or proces_aplay.poll() != None):
         proces_aplay = subprocess.Popen(f"aplay --device=hw:1,0 {audio_path}", shell=True)
         # proces_aplay.returncode
         logger.info("音楽の再生中です")
