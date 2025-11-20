@@ -64,6 +64,7 @@ logger.info('ライブラリをインポートしています')
 from gpiozero import Motor
 from gpiozero.pins.pigpio import PiGPIOFactory
 from picamera2 import Picamera2
+# import libcamera
 # from pyPS4Controller.controller import Controller
 import evdev
 from evdev import InputDevice, categorize, ecodes
@@ -159,20 +160,19 @@ logger.info('コントローラーによる制御システムのセットアッ�
 
 last_controll_time = time.time()
 
+# コントローラーの入力をモーターの-1~1の範囲の入力に修正する
 def transf(raw):
-    temp = raw / (1 << 15)
-    # Filter values that are too weak for the motors to move
+    temp = (raw - 127.5) / 127.5
+    
+    # デッドゾーン
     if abs(temp) < 0.05:
         return 0
-    # Return a value between 0.2 and 1.0
     else:
         return round(temp, 2)
 
-# 右スティック前：R2_press　負
-# 右スティック後：R2_press　正
-# 左スティック前：L3_up　負
-# 左スティック後：L3_down　正
-# ×ボタン→〇ボタン，〇ボタン→△ボタン，△ボタン→□ボタン，□ボタン→×ボタン
+# pyPS4Controller: -32768(上) ~ 32767(下)
+# evdev: 0(上) ~ 255(下) 中心値: 127.5
+# 多分
 
 def connect():
     logger.warning('<<警告>>\nコントローラーと接続しました')
@@ -185,7 +185,8 @@ def start_controller():
     
     while True:
         device = None
-        logger.info("コントローラーを探しています...")
+        logger.info("コントローラーデバイスを探しています... (PSボタンを押して接続してください)")
+        
         while device is None:
             try:
                 devices = [evdev.InputDevice(path) for path in evdev.list_devices()]
@@ -195,43 +196,56 @@ def start_controller():
                         break
             except Exception:
                 pass
+            
             if device is None:
-                time.sleep(1)
+                time.sleep(2)
         
         connect()
-        logger.info(f"Connected to {device.name}")
+        logger.info(f"Connected to {device.name} at {device.path}")
 
         try:
+            # デバイスを占有
+            device.grab()
+            
             for event in device.read_loop():
                 if event.type == ecodes.EV_ABS:
                     if event.code == ecodes.ABS_RY: # Right Stick Y
                         last_controll_time = time.time()
                         motor_right.value = -transf(event.value)
+
                     elif event.code == ecodes.ABS_Y: # Left Stick Y
                         last_controll_time = time.time()
                         motor_left.value = -transf(event.value)
                 
                 elif event.type == ecodes.EV_KEY:
-                    if event.value == 1: # Pressed
+                    if event.value == 1:
                         last_controll_time = time.time()
-                        if event.code == ecodes.BTN_SOUTH: # Cross (X)
+                        # ボタンマッピング (標準ドライバの場合)
+                        if event.code == ecodes.BTN_SOUTH or event.code == 304: # X
                             logger.info('×ボタンが押されました')
                             audio_play("/home/jaxai/Desktop/GLaDOS_escape_02_entry-00.wav")
-                        elif event.code == ecodes.BTN_WEST: # Square
+                        elif event.code == ecodes.BTN_WEST or event.code == 308: # Square
                             logger.info('□ボタンが押されました')
                             audio_play("/home/jaxai/Desktop/kane_tarinai.wav")
-                        elif event.code == ecodes.BTN_EAST: # Circle
+                        elif event.code == ecodes.BTN_EAST or event.code == 305: # Circle
                             logger.info('○ボタンが押されました')
                             audio_play("/home/jaxai/Desktop/hatodokei.wav")
-                        elif event.code == ecodes.BTN_NORTH: # Triangle
+                        elif event.code == ecodes.BTN_NORTH or event.code == 307: # Triangle
                             logger.info('△ボタンが押されました')
                             audio_play("/home/jaxai/Desktop/otoko_ou!.wav")
+        
         except OSError:
             disconnect()
             time.sleep(1)
         except Exception as e:
-            logger.error(f'<<エラー>>\nコントローラーによる制御でエラーが発生しました: {e}')
+            logger.error(f'<<エラー>>\nコントローラー制御エラー: {e}')
+            disconnect()
             time.sleep(1)
+        finally:
+            try:
+                device.ungrab()
+            except Exception:
+                pass
 
 logger.info('コントローラーによる制御システムのセットアップが完了しました')
 
@@ -290,7 +304,7 @@ logger.info('カメラのセットアップを開始しました')
 
 picam2 = Picamera2()
 picam_config = picam2.create_preview_configuration()
-picam_config["transform"] = libcamera.Transform(hflip=1, vflip=1)
+# picam_config["transform"] = libcamera.Transform(hflip=1, vflip=1)
 picam2.configure(picam_config)
 picam2.start()
 
@@ -312,20 +326,20 @@ motor_calib()
 logger.info('モーターの動作確認が完了しました')
 
 
-##### 平行処理を開始 #####
+##### 平行処理(daemon)を開始 #####
 logger.info('並行処理による同時実行システムの定義を行います')
 
 # コントローラーを起動
-controller_thread = threading.Thread(target=start_controller)
+controller_thread = threading.Thread(target=start_controller, daemon=True)
 
 # GUI用のサーバーを起動
-server_thread = threading.Thread(target=start_gui.start_server)
+server_thread = threading.Thread(target=start_gui.start_server, daemon=True)
 
 # GUIのデータを読み込み・書き込み
-gui_thread = threading.Thread(target=update_gui)
+gui_thread = threading.Thread(target=update_gui, daemon=True)
 
 # カメラで撮影開始
-camera_thread = threading.Thread(target=start_camera)
+camera_thread = threading.Thread(target=start_camera, daemon=True)
 
 logger.info('コントローラーを起動します')
 controller_thread.start()
