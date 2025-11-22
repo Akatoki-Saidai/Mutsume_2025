@@ -34,116 +34,116 @@ f_handler.setLevel(DEBUG)
 f_handler.setFormatter(tsv_format)
 logger.addHandler(f_handler)
 
-logger.info("セットアップを開始します")
+logger.info("セットアップ開始")
 
 if sys.prefix == sys.base_prefix:
-    logger.warning("<<警告>>\n仮想環境ではありません")
-    time.sleep(3)
+    logger.warning("<<警告>> 仮想環境で実行されていません")
+    time.sleep(2)
 
-logger.info("ライブラリをインポートしています")
+logger.info("ライブラリ読み込み中")
 from gpiozero import Motor
 from picamera2 import Picamera2
 import evdev
 from evdev import ecodes
 import start_gui_2
-logger.info("ライブラリのインポート完了")
+logger.info("ライブラリ読み込み完了")
 
 # =============================
-# モーター（ピン配置を前の値に戻した）
+# モーター（あなたのピン配置のまま）
 # =============================
 PIN_R1 = 2
 PIN_R2 = 3
 PIN_L1 = 17
 PIN_L2 = 27
 
-# ★ 前のコードの向きに戻した（右 forward=PIN_R1, 左 forward=PIN_L1）
 motor_right = Motor(forward=PIN_R1, backward=PIN_R2)
 motor_left  = Motor(forward=PIN_L1, backward=PIN_L2)
 
+# スティック状態
 throttle = 0.0
 steer = 0.0
 
 def clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
-def scale_axis_evdev(v: int) -> float:
+def scale_axis_evdev(v: int):
     center = 127.5
-    val = abs(v - center) / center
-    if val < 0.15:
+    val = (v - center) / center  # -1.0〜1.0
+    if abs(val) < 0.1:
         return 0.0
-    return clamp(val, 0.0, 1.0)
+    return clamp(val, -1.0, 1.0)
 
+# =============================
+# ★ RCカー自然動作 update_motors ★
+# =============================
 def update_motors():
     global throttle, steer
 
-    left_power = throttle + steer
-    right_power = throttle - steer
+    # 前後のみ
+    if abs(steer) < 0.05:
+        motor_left.value = throttle
+        motor_right.value = throttle
+        logger.debug(f"直進/後退: L={motor_left.value:.2f} R={motor_right.value:.2f}")
+        return
 
-    left_power = clamp(left_power, -1.0, 1.0)
-    right_power = clamp(right_power, -1.0, 1.0)
+    # 左右のみ
+    if abs(throttle) < 0.05:
+        # 右旋回 → 右停止＋左前進
+        if steer > 0:
+            motor_left.value = steer
+            motor_right.value = 0
+        else:
+            motor_left.value = 0
+            motor_right.value = -steer
+        logger.debug(f"旋回: L={motor_left.value:.2f} R={motor_right.value:.2f}")
+        return
 
-    if abs(left_power) < 0.01 and abs(right_power) < 0.01:
-        motor_left.stop()
-        motor_right.stop()
+    # 同時操作 → カーブ
+    if steer > 0:
+        motor_left.value = throttle
+        motor_right.value = throttle * (1 - steer)
     else:
-        motor_left.value = left_power
-        motor_right.value = right_power
+        motor_left.value = throttle * (1 + steer)
+        motor_right.value = throttle
 
-    logger.debug(f"motors: L={left_power:.2f}, R={right_power:.2f}")
-
-def motor_calib():
-    logger.info("モーターキャリブレーション開始")
-    motor_left.value = 0
-    motor_right.value = 0
-    time.sleep(0.3)
-    logger.info("キャリブレーション完了")
+    logger.debug(f"カーブ: L={motor_left.value:.2f} R={motor_right.value:.2f}")
 
 # =============================
 # スピーカー
 # =============================
 proces_aplay = None
-
 def audio_play(path):
     global proces_aplay
     if proces_aplay is None or proces_aplay.poll() is not None:
         proces_aplay = subprocess.Popen(
             f"aplay --device=hw:1,0 {path}",
-            shell=True,
-        )
-        logger.info("音声再生開始")
+            shell=True)
+        logger.info("音声再生")
     else:
-        logger.info("すでに再生中のためスキップ")
+        logger.info("すでに再生中")
 
 # =============================
-# コントローラー
+# コントローラ
 # =============================
-
 last_controll_time = time.time()
 
 def start_controller():
     global throttle, steer, last_controll_time
 
-    center = 127.5
-
     while True:
         device = None
-        logger.info("コントローラーを探しています… (PSボタンを押してください)")
+        logger.info("コントローラー検索中… PSボタンを押してください")
 
         while device is None:
             try:
                 devices = [evdev.InputDevice(p) for p in evdev.list_devices()]
-                candidates = [
-                    d for d in devices
-                    if "Wireless Controller" in d.name and "Touchpad" not in d.name
-                ]
+                candidates = [d for d in devices
+                              if "Wireless Controller" in d.name
+                              and "Touchpad" not in d.name]
                 if candidates:
                     device = candidates[0]
-                else:
-                    logger.debug("見つかったデバイス: %s",
-                        [(d.path, d.name) for d in devices])
-            except Exception:
+            except:
                 pass
-
             if device is None:
                 time.sleep(2)
 
@@ -151,36 +151,28 @@ def start_controller():
 
         try:
             device.grab()
-
             for event in device.read_loop():
+
+                # アナログスティック
                 if event.type == ecodes.EV_ABS:
-                    # 左スティック Y 軸（前後）
+                    # 前後：ABS_Y（上が前）
                     if event.code == ecodes.ABS_Y:
                         last_controll_time = time.time()
-                        p = scale_axis_evdev(event.value)
-                        if p == 0:
-                            throttle = 0
-                        else:
-                            throttle = p if event.value < center else -p
-                        logger.debug("ABS_Y raw=%d -> throttle=%.2f", event.value, throttle)
+                        throttle = -scale_axis_evdev(event.value)  # 上が前なので反転
                         update_motors()
 
-                    # 左スティック X 軸（左右）
+                    # 左右：ABS_X
                     elif event.code == ecodes.ABS_X:
                         last_controll_time = time.time()
-                        p = scale_axis_evdev(event.value)
-                        if p == 0:
-                            steer = 0
-                        else:
-                            steer = p if event.value > center else -p
-                        logger.debug("ABS_X raw=%d -> steer=%.2f", event.value, steer)
+                        steer = scale_axis_evdev(event.value)
                         update_motors()
 
+                # ボタン
                 elif event.type == ecodes.EV_KEY and event.value == 1:
                     last_controll_time = time.time()
 
+                    # ×ボタン → 停止
                     if event.code in (ecodes.BTN_SOUTH, 304):
-                        logger.info("×ボタン → 非常停止")
                         throttle = steer = 0
                         motor_left.stop()
                         motor_right.stop()
@@ -188,26 +180,23 @@ def start_controller():
 
                     elif event.code in (ecodes.BTN_WEST, 308):
                         audio_play("/home/jaxai/Desktop/kane_tarinai.wav")
-
                     elif event.code in (ecodes.BTN_EAST, 305):
                         audio_play("/home/jaxai/Desktop/hatodokei.wav")
-
                     elif event.code in (ecodes.BTN_NORTH, 307):
                         audio_play("/home/jaxai/Desktop/otoko_ou!.wav")
 
         except Exception as e:
-            logger.error(f"Controller error: {e}")
+            logger.error(f"controller error: {e}")
             time.sleep(1)
         finally:
             try:
                 device.ungrab()
-            except Exception:
+            except:
                 pass
 
 # =============================
 # GUI 読み書き
 # =============================
-
 def read_from_gui():
     global last_controll_time
     if time.time() - last_controll_time < 1:
@@ -235,17 +224,13 @@ def write_to_gui():
 
 def update_gui():
     while True:
-        try:
-            read_from_gui()
-            write_to_gui()
-            time.sleep(0.5)
-        except Exception as e:
-            logger.error(f"GUI error: {e}")
+        read_from_gui()
+        write_to_gui()
+        time.sleep(0.5)
 
 # =============================
 # カメラ
 # =============================
-
 picam2 = Picamera2()
 cfg = picam2.create_preview_configuration()
 picam2.configure(cfg)
@@ -258,21 +243,22 @@ def start_camera():
             os.replace("camera_temp.jpg", "camera.jpg")
             time.sleep(0.1)
         except Exception as e:
-            logger.error(f"Camera error: {e}")
+            logger.error(f"camera error: {e}")
 
 # =============================
 # 起動処理
 # =============================
-
-logger.info("モーターキャリブレーション開始")
-motor_calib()
+logger.info("モーター初期化")
+motor_left.value = 0
+motor_right.value = 0
+time.sleep(0.3)
 
 threading.Thread(target=start_controller, daemon=True).start()
 threading.Thread(target=start_gui_2.start_server, kwargs={"logger": logger}, daemon=True).start()
 threading.Thread(target=update_gui, daemon=True).start()
 threading.Thread(target=start_camera, daemon=True).start()
 
-logger.info("すべてのセットアップ完了")
+logger.info("全システム起動完了")
 
 while True:
     time.sleep(10)
