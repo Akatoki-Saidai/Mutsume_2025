@@ -59,18 +59,12 @@ PIN_AIN2 = 3
 PIN_BIN1 = 17
 PIN_BIN2 = 27
 
-# your original mapping:
-# self.motor_left  = Motor(forward=PIN_AIN2, backward=PIN_AIN1)
-# self.motor_right = Motor(forward=PIN_BIN2, backward=PIN_BIN1)
 motor_left = Motor(forward=PIN_AIN2, backward=PIN_AIN1)
 motor_right = Motor(forward=PIN_BIN2, backward=PIN_BIN1)
 
 # left stick state
 throttle = 0.0  # forward/back (-1..+1)
 steer = 0.0     # left/right  (-1..+1)
-
-# controller vs GUI 優先度用
-last_controll_time = time.time()
 
 
 def clamp(x: float, lo: float, hi: float) -> float:
@@ -87,33 +81,6 @@ def scale_axis(v: int) -> float:
     if val < 0.15:
         return 0.0
     return clamp(val, 0.0, 1.0)
-
-
-def update_motors_from_state():
-    """
-    Same motor mixing as your MyController.update_motors():
-        left  = throttle + steer
-        right = throttle - steer
-    """
-    global throttle, steer
-
-    left_power = throttle + steer
-    right_power = throttle - steer
-
-    left_power = clamp(left_power, -1.0, 1.0)
-    right_power = clamp(right_power, -1.0, 1.0)
-
-    if abs(left_power) < 0.01 and abs(right_power) < 0.01:
-        motor_left.stop()
-        motor_right.stop()
-    else:
-        motor_left.value = left_power
-        motor_right.value = right_power
-
-    logger.debug(
-        "motors: L=%.2f R=%.2f (throttle=%.2f steer=%.2f)",
-        left_power, right_power, throttle, steer
-    )
 
 
 def motor_init():
@@ -144,7 +111,7 @@ def audio_play(path: str):
 
 
 # =============================
-# PS4 controller (your MyController, integrated)
+# PS4 controller (your MyController)
 # =============================
 
 class MyController(Controller):
@@ -162,62 +129,40 @@ class MyController(Controller):
 
     # ----- left stick Y -----
     def on_L3_up(self, value):
-        global throttle, last_controll_time
         p = scale_axis(value)
         self.throttle = p
-        throttle = self.throttle
-        last_controll_time = time.time()
         self.update_motors()
 
     def on_L3_down(self, value):
-        global throttle, last_controll_time
         p = scale_axis(value)
         self.throttle = -p
-        throttle = self.throttle
-        last_controll_time = time.time()
         self.update_motors()
 
     def on_L3_y_at_rest(self):
-        global throttle, last_controll_time
         self.throttle = 0.0
-        throttle = 0.0
-        last_controll_time = time.time()
         self.update_motors()
 
     # ----- left stick X -----
     def on_L3_right(self, value):
-        global steer, last_controll_time
         p = scale_axis(value)
         self.steer = p
-        steer = self.steer
-        last_controll_time = time.time()
         self.update_motors()
 
     def on_L3_left(self, value):
-        global steer, last_controll_time
         p = scale_axis(value)
         self.steer = -p
-        steer = self.steer
-        last_controll_time = time.time()
         self.update_motors()
 
     def on_L3_x_at_rest(self):
-        global steer, last_controll_time
         self.steer = 0.0
-        steer = 0.0
-        last_controll_time = time.time()
         self.update_motors()
 
     # ----- X button (emergency stop) -----
     def on_x_press(self):
-        global throttle, steer, last_controll_time
         self.throttle = 0.0
         self.steer = 0.0
-        throttle = 0.0
-        steer = 0.0
         self.motor_left.stop()
         self.motor_right.stop()
-        last_controll_time = time.time()
         print("X pressed: EMERGENCY STOP")
         # audio_play("/home/jaxai/Desktop/GLaDOS_escape_02_entry-00.wav")
 
@@ -242,10 +187,6 @@ class MyController(Controller):
             "motors(MyController): L=%.2f R=%.2f (thr=%.2f steer=%.2f)",
             left_power, right_power, self.throttle, self.steer
         )
-        # 同期のため global にも反映
-        global throttle, steer
-        throttle = self.throttle
-        steer = self.steer
 
 
 def start_controller():
@@ -258,31 +199,20 @@ def start_controller():
 
 
 # =============================
-# GUI (controller優先でモーターは書き換え)
+# GUI (no control over motors, only status output)
 # =============================
 
 def read_from_gui():
-    global throttle, steer, last_controll_time
-
-    # controller入力から 1 秒以内は GUI からの上書きを無視
-    if time.time() - last_controll_time < 1.0:
-        return
-
+    # ignore any commands from browser (no motor control via GUI)
     try:
         with open("data_from_browser.json") as f:
-            d = json.load(f)
-        # GUI からは direct に motor value を指定（-1..+1）
-        motor_left.value = float(d["motor_l"])
-        motor_right.value = float(d["motor_r"])
-        # global 状態も合わせておく
-        # ここは簡単に「平均」としておく（厳密でなくてOK）
-        throttle = (motor_left.value + motor_right.value) / 2.0
-        steer = (motor_left.value - motor_right.value) / 2.0
+            _ = json.load(f)
     except Exception:
         pass
 
 
 def write_to_gui():
+    # only expose current motor values to browser
     try:
         with open("data_to_browser.json") as f:
             d = json.load(f)
@@ -299,8 +229,8 @@ def write_to_gui():
 def update_gui():
     while True:
         try:
-            read_from_gui()
-            write_to_gui()
+            read_from_gui()   # just to keep file fresh / avoid errors
+            write_to_gui()    # send current motor state to browser
             time.sleep(0.5)
         except Exception as e:
             logger.error("GUI error: %s", e)
