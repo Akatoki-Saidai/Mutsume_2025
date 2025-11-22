@@ -54,7 +54,7 @@ import start_gui_2
 logger.info("ライブラリ読み込み完了")
 
 # =============================
-# モーター（参考コードのピンと向き）
+# モーター（MyController と同じピン＆向き）
 # =============================
 
 PIN_AIN1 = 2
@@ -62,7 +62,9 @@ PIN_AIN2 = 3
 PIN_BIN1 = 17
 PIN_BIN2 = 27
 
-# MyController と同じ向きにあわせる
+# MyController:
+# self.motor_left  = Motor(forward=PIN_AIN2, backward=PIN_AIN1)
+# self.motor_right = Motor(forward=PIN_BIN2, backward=PIN_BIN1)
 motor_left  = Motor(forward=PIN_AIN2, backward=PIN_AIN1)
 motor_right = Motor(forward=PIN_BIN2, backward=PIN_BIN1)
 
@@ -78,12 +80,12 @@ def clamp(x: float, lo: float, hi: float) -> float:
 def scale_axis_evdev(v: int) -> float:
     """
     evdev の ABS_* (0〜255, center ≒127.5) を
-    MyController の scale_axis と同じイメージで 0.0〜1.0 に正規化（絶対値のみ）。
+    MyController.scale_axis(v) と同じイメージで 0.0〜1.0 に正規化（絶対値のみ）。
     """
     center = 127.5
     mag = abs(v - center) / center  # 0.0〜1.0
 
-    # デッドゾーン
+    # デッドゾーン（MyController: val < 0.15 → 0.0）
     if mag < 0.15:
         return 0.0
 
@@ -92,9 +94,10 @@ def scale_axis_evdev(v: int) -> float:
 
 def update_motors():
     """
-    MyController と同じ差動制御ロジック：
-      left  = throttle + steer
-      right = throttle - steer
+    MyController.update_motors() と同じロジック：
+
+        left_power  = throttle + steer
+        right_power = throttle - steer
     """
     global throttle, steer
 
@@ -112,12 +115,15 @@ def update_motors():
         motor_left.value = left_power
         motor_right.value = right_power
 
-    logger.debug(f"motors: L={left_power:.2f}, R={right_power:.2f} (throttle={throttle:.2f}, steer={steer:.2f})")
+    logger.debug(
+        f"motors: L={left_power:.2f}, R={right_power:.2f} "
+        f"(throttle={throttle:.2f}, steer={steer:.2f})"
+    )
 
 
 def motor_calib():
     """
-    簡易キャリブレーション（いまは全停止だけ）
+    簡易キャリブレーション（全停止だけ）
     """
     logger.info("モーター初期化")
     motor_left.value = 0
@@ -146,7 +152,7 @@ def audio_play(path: str):
 
 
 # =============================
-# コントローラー
+# コントローラー（MyController の挙動を evdev で再現）
 # =============================
 
 last_controll_time = time.time()
@@ -155,8 +161,13 @@ last_controll_time = time.time()
 def start_controller():
     """
     evdev を使って、MyController と同じ意味の throttle / steer を作る。
-    - ABS_Y: 上 = 前進（throttle > 0）、下 = 後退（throttle < 0）
-    - ABS_X: 右 = 右旋回（steer > 0）、左 = 左旋回（steer < 0）
+
+    MyController の対応：
+      on_L3_up(value)   → throttle = +p
+      on_L3_down(value) → throttle = -p
+      on_L3_right(value)→ steer    = +p
+      on_L3_left(value) → steer    = -p
+      on_x_press        → 非常停止
     """
     global throttle, steer, last_controll_time
 
@@ -177,8 +188,10 @@ def start_controller():
                 if candidates:
                     device = candidates[0]
                 else:
-                    logger.debug("見つかったデバイス: %s",
-                                 [(d.path, d.name) for d in devices])
+                    logger.debug(
+                        "見つかったデバイス: %s",
+                        [(d.path, d.name) for d in devices],
+                    )
             except Exception as e:
                 logger.error("デバイス列挙中のエラー: %s", e)
 
@@ -195,54 +208,62 @@ def start_controller():
                 # アナログスティック
                 if event.type == ecodes.EV_ABS:
 
-                    # 左スティック Y（前後）
+                    # 左スティック Y（前後）→ MyController.on_L3_up / on_L3_down
                     if event.code == ecodes.ABS_Y:
                         last_controll_time = time.time()
                         p = scale_axis_evdev(event.value)
 
                         if p == 0.0:
+                            # on_L3_y_at_rest
                             throttle = 0.0
                         else:
                             if event.value < center:
-                                # 上 = 前進（MyController: on_L3_up）
+                                # 上 = 前進
                                 throttle = p
                             else:
-                                # 下 = 後退（MyController: on_L3_down）
+                                # 下 = 後退
                                 throttle = -p
 
-                        logger.debug("ABS_Y raw=%d -> throttle=%.2f", event.value, throttle)
+                        logger.debug(
+                            "ABS_Y raw=%d -> throttle=%.2f", event.value, throttle
+                        )
                         update_motors()
 
-                    # 左スティック X（左右）
+                    # 左スティック X（左右）→ MyController.on_L3_right / on_L3_left
                     elif event.code == ecodes.ABS_X:
                         last_controll_time = time.time()
                         p = scale_axis_evdev(event.value)
 
                         if p == 0.0:
+                            # on_L3_x_at_rest
                             steer = 0.0
                         else:
                             if event.value > center:
-                                # 右 = 右旋回（MyController: on_L3_right）
+                                # 右
                                 steer = p
                             else:
-                                # 左 = 左旋回（MyController: on_L3_left）
+                                # 左
                                 steer = -p
 
-                        logger.debug("ABS_X raw=%d -> steer=%.2f", event.value, steer)
+                        logger.debug(
+                            "ABS_X raw=%d -> steer=%.2f", event.value, steer
+                        )
                         update_motors()
 
                 # ボタン
                 elif event.type == ecodes.EV_KEY and event.value == 1:
                     last_controll_time = time.time()
 
-                    # ×ボタン → 非常停止（MyController: on_x_press）
+                    # ×ボタン → 非常停止（MyController.on_x_press）
                     if event.code in (ecodes.BTN_SOUTH, 304):
                         logger.info("×ボタン → EMERGENCY STOP")
                         throttle = 0.0
                         steer = 0.0
                         motor_left.stop()
                         motor_right.stop()
-                        audio_play("/home/jaxai/Desktop/GLaDOS_escape_02_entry-00.wav")
+                        audio_play(
+                            "/home/jaxai/Desktop/GLaDOS_escape_02_entry-00.wav"
+                        )
 
                     elif event.code in (ecodes.BTN_WEST, 308):
                         logger.info("□ボタン")
