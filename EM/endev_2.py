@@ -7,9 +7,9 @@ import sys
 import threading
 import time
 
-# --------------------------------------------------------------------
+# =============================
 # basic setup
-# --------------------------------------------------------------------
+# =============================
 os.chdir(os.path.dirname(__file__))
 
 try:
@@ -40,60 +40,60 @@ logger.addHandler(f_handler)
 logger.info("setup start")
 
 if sys.prefix == sys.base_prefix:
-    logger.warning("<<警告>> virtualenv ではありません")
+    logger.warning("WARNING: not running in virtualenv")
     time.sleep(1)
 
 logger.info("importing libraries")
 from gpiozero import Motor
 from picamera2 import Picamera2
-import evdev
-from evdev import ecodes
-import start_gui_2
+from pyPS4Controller.controller import Controller
+import start_gui
 logger.info("libraries imported")
 
-# --------------------------------------------------------------------
-# motors (same mapping as MyController)
-# --------------------------------------------------------------------
+# =============================
+# motors (same as your MyController)
+# =============================
+
 PIN_AIN1 = 2
 PIN_AIN2 = 3
 PIN_BIN1 = 17
 PIN_BIN2 = 27
 
-# same as:
-#   self.motor_left  = Motor(forward=PIN_AIN2, backward=PIN_AIN1)
-#   self.motor_right = Motor(forward=PIN_BIN2, backward=PIN_BIN1)
-motor_left  = Motor(forward=PIN_AIN2, backward=PIN_AIN1)
+# your original mapping:
+# self.motor_left  = Motor(forward=PIN_AIN2, backward=PIN_AIN1)
+# self.motor_right = Motor(forward=PIN_BIN2, backward=PIN_BIN1)
+motor_left = Motor(forward=PIN_AIN2, backward=PIN_AIN1)
 motor_right = Motor(forward=PIN_BIN2, backward=PIN_BIN1)
 
-throttle = 0.0  # forward/back (-1.0 .. +1.0)
-steer = 0.0     # left/right   (-1.0 .. +1.0)
+# left stick state
+throttle = 0.0  # forward/back (-1..+1)
+steer = 0.0     # left/right  (-1..+1)
+
+# controller vs GUI 優先度用
+last_controll_time = time.time()
 
 
 def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
 
-def scale_axis_evdev(v: int) -> float:
+def scale_axis(v: int) -> float:
     """
-    Convert evdev ABS_* (0..255, center~127.5) to |value| 0.0..1.0.
-    Same concept as MyController.scale_axis().
+    Same idea as your scale_axis:
+    PS4 axis value (-32768 .. 32767) -> |value| 0.0 .. 1.0 (with deadzone)
     """
-    center = 127.5
-    mag = abs(v - center) / center  # 0.0 .. 1.0
-
-    # dead zone
-    if mag < 0.15:
+    v = abs(v)
+    val = v / 32767.0
+    if val < 0.15:
         return 0.0
+    return clamp(val, 0.0, 1.0)
 
-    return clamp(mag, 0.0, 1.0)
 
-
-def update_motors():
+def update_motors_from_state():
     """
-    Same logic as MyController.update_motors():
-
-        left_power  = throttle + steer
-        right_power = throttle - steer
+    Same motor mixing as your MyController.update_motors():
+        left  = throttle + steer
+        right = throttle - steer
     """
     global throttle, steer
 
@@ -111,7 +111,7 @@ def update_motors():
         motor_right.value = right_power
 
     logger.debug(
-        "motors: L=%.2f R=%.2f (throttle=%.2f, steer=%.2f)",
+        "motors: L=%.2f R=%.2f (throttle=%.2f steer=%.2f)",
         left_power, right_power, throttle, steer
     )
 
@@ -124,9 +124,10 @@ def motor_init():
     logger.info("motor init done")
 
 
-# --------------------------------------------------------------------
-# speaker
-# --------------------------------------------------------------------
+# =============================
+# speaker (optional)
+# =============================
+
 proces_aplay = None
 
 
@@ -142,145 +143,141 @@ def audio_play(path: str):
         logger.info("audio already playing, skip")
 
 
-# --------------------------------------------------------------------
-# controller (evdev version of MyController)
-# --------------------------------------------------------------------
-last_controll_time = time.time()
+# =============================
+# PS4 controller (your MyController, integrated)
+# =============================
+
+class MyController(Controller):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        # use global motors
+        self.motor_left = motor_left
+        self.motor_right = motor_right
+
+        self.throttle = 0.0  # forward/back
+        self.steer = 0.0     # left/right
+
+        print("Motors initialized, waiting for controller...")
+
+    # ----- left stick Y -----
+    def on_L3_up(self, value):
+        global throttle, last_controll_time
+        p = scale_axis(value)
+        self.throttle = p
+        throttle = self.throttle
+        last_controll_time = time.time()
+        self.update_motors()
+
+    def on_L3_down(self, value):
+        global throttle, last_controll_time
+        p = scale_axis(value)
+        self.throttle = -p
+        throttle = self.throttle
+        last_controll_time = time.time()
+        self.update_motors()
+
+    def on_L3_y_at_rest(self):
+        global throttle, last_controll_time
+        self.throttle = 0.0
+        throttle = 0.0
+        last_controll_time = time.time()
+        self.update_motors()
+
+    # ----- left stick X -----
+    def on_L3_right(self, value):
+        global steer, last_controll_time
+        p = scale_axis(value)
+        self.steer = p
+        steer = self.steer
+        last_controll_time = time.time()
+        self.update_motors()
+
+    def on_L3_left(self, value):
+        global steer, last_controll_time
+        p = scale_axis(value)
+        self.steer = -p
+        steer = self.steer
+        last_controll_time = time.time()
+        self.update_motors()
+
+    def on_L3_x_at_rest(self):
+        global steer, last_controll_time
+        self.steer = 0.0
+        steer = 0.0
+        last_controll_time = time.time()
+        self.update_motors()
+
+    # ----- X button (emergency stop) -----
+    def on_x_press(self):
+        global throttle, steer, last_controll_time
+        self.throttle = 0.0
+        self.steer = 0.0
+        throttle = 0.0
+        steer = 0.0
+        self.motor_left.stop()
+        self.motor_right.stop()
+        last_controll_time = time.time()
+        print("X pressed: EMERGENCY STOP")
+        # audio_play("/home/jaxai/Desktop/GLaDOS_escape_02_entry-00.wav")
+
+    def update_motors(self):
+        """
+        exactly your update_motors()
+        """
+        left_power = self.throttle + self.steer
+        right_power = self.throttle - self.steer
+
+        left_power = clamp(left_power, -1.0, 1.0)
+        right_power = clamp(right_power, -1.0, 1.0)
+
+        if abs(left_power) < 0.01 and abs(right_power) < 0.01:
+            self.motor_left.stop()
+            self.motor_right.stop()
+        else:
+            self.motor_left.value = left_power
+            self.motor_right.value = right_power
+
+        logger.debug(
+            "motors(MyController): L=%.2f R=%.2f (thr=%.2f steer=%.2f)",
+            left_power, right_power, self.throttle, self.steer
+        )
+        # 同期のため global にも反映
+        global throttle, steer
+        throttle = self.throttle
+        steer = self.steer
 
 
 def start_controller():
-    """
-    Reproduce MyController behavior with evdev.
+    controller = MyController(
+        interface="/dev/input/js0",
+        connecting_using_ds4drv=False,
+    )
+    logger.info("Listening PS4 controller (left stick)...")
+    controller.listen()
 
-    - ABS_Y: up   -> throttle = +p
-             down -> throttle = -p
-    - ABS_X: right -> steer = +p
-             left  -> steer = -p
-    - BTN_SOUTH (×): emergency stop
-    """
+
+# =============================
+# GUI (controller優先でモーターは書き換え)
+# =============================
+
+def read_from_gui():
     global throttle, steer, last_controll_time
 
-    center = 127.5
+    # controller入力から 1 秒以内は GUI からの上書きを無視
+    if time.time() - last_controll_time < 1.0:
+        return
 
-    while True:
-        device = None
-        logger.info("searching PS4 controller... (press PS button)")
-
-        # find correct input device (exclude Touchpad-only)
-        while device is None:
-            try:
-                devices = [evdev.InputDevice(p) for p in evdev.list_devices()]
-                candidates = [
-                    d for d in devices
-                    if "Wireless Controller" in d.name and "Touchpad" not in d.name
-                ]
-                if candidates:
-                    device = candidates[0]
-                else:
-                    logger.debug(
-                        "available devices: %s",
-                        [(d.path, d.name) for d in devices]
-                    )
-            except Exception as e:
-                logger.error("device listing error: %s", e)
-
-            if device is None:
-                time.sleep(2)
-
-        logger.info("controller connected: %s (%s)", device.path, device.name)
-
-        try:
-            device.grab()
-
-            for event in device.read_loop():
-                # debug all events (first stage)
-                logger.debug("event: type=%d code=%d value=%d",
-                             event.type, event.code, event.value)
-
-                # analog sticks
-                if event.type == ecodes.EV_ABS:
-
-                    # left stick Y (forward/back)
-                    if event.code == ecodes.ABS_Y:
-                        last_controll_time = time.time()
-                        p = scale_axis_evdev(event.value)
-
-                        if p == 0.0:
-                            throttle = 0.0
-                        else:
-                            if event.value < center:
-                                # up -> forward
-                                throttle = p
-                            else:
-                                # down -> backward
-                                throttle = -p
-
-                        logger.info("ABS_Y: raw=%d -> throttle=%.2f",
-                                    event.value, throttle)
-                        update_motors()
-
-                    # left stick X (left/right)
-                    elif event.code == ecodes.ABS_X:
-                        last_controll_time = time.time()
-                        p = scale_axis_evdev(event.value)
-
-                        if p == 0.0:
-                            steer = 0.0
-                        else:
-                            if event.value > center:
-                                # right
-                                steer = p
-                            else:
-                                # left
-                                steer = -p
-
-                        logger.info("ABS_X: raw=%d -> steer=%.2f",
-                                    event.value, steer)
-                        update_motors()
-
-                # buttons
-                elif event.type == ecodes.EV_KEY and event.value == 1:
-                    last_controll_time = time.time()
-                    logger.info("button pressed: code=%d", event.code)
-
-                    # × button -> emergency stop
-                    if event.code in (ecodes.BTN_SOUTH, 304):
-                        logger.info("X pressed: EMERGENCY STOP")
-                        throttle = 0.0
-                        steer = 0.0
-                        motor_left.stop()
-                        motor_right.stop()
-                        audio_play(
-                            "/home/jaxai/Desktop/GLaDOS_escape_02_entry-00.wav"
-                        )
-
-                    elif event.code in (ecodes.BTN_WEST, 308):
-                        audio_play("/home/jaxai/Desktop/kane_tarinai.wav")
-
-                    elif event.code in (ecodes.BTN_EAST, 305):
-                        audio_play("/home/jaxai/Desktop/hatodokei.wav")
-
-                    elif event.code in (ecodes.BTN_NORTH, 307):
-                        audio_play("/home/jaxai/Desktop/otoko_ou!.wav")
-
-        except Exception as e:
-            logger.error("controller error: %s", e)
-            time.sleep(1)
-        finally:
-            try:
-                device.ungrab()
-            except Exception:
-                pass
-
-
-# --------------------------------------------------------------------
-# GUI (motors are NOT overridden by GUI for now)
-# --------------------------------------------------------------------
-def read_from_gui():
-    # do not overwrite motors from GUI while debugging controller
     try:
         with open("data_from_browser.json") as f:
-            _ = json.load(f)
+            d = json.load(f)
+        # GUI からは direct に motor value を指定（-1..+1）
+        motor_left.value = float(d["motor_l"])
+        motor_right.value = float(d["motor_r"])
+        # global 状態も合わせておく
+        # ここは簡単に「平均」としておく（厳密でなくてOK）
+        throttle = (motor_left.value + motor_right.value) / 2.0
+        steer = (motor_left.value - motor_right.value) / 2.0
     except Exception:
         pass
 
@@ -289,7 +286,6 @@ def write_to_gui():
     try:
         with open("data_to_browser.json") as f:
             d = json.load(f)
-        # expose current motor values to browser
         d["motor_l"] = motor_left.value
         d["motor_r"] = motor_right.value
         d["light"] = False
@@ -310,9 +306,10 @@ def update_gui():
             logger.error("GUI error: %s", e)
 
 
-# --------------------------------------------------------------------
+# =============================
 # camera
-# --------------------------------------------------------------------
+# =============================
+
 picam2 = Picamera2()
 cfg = picam2.create_preview_configuration()
 picam2.configure(cfg)
@@ -329,15 +326,16 @@ def start_camera():
             logger.error("Camera error: %s", e)
 
 
-# --------------------------------------------------------------------
+# =============================
 # startup
-# --------------------------------------------------------------------
+# =============================
+
 logger.info("motor init")
 motor_init()
 
 threading.Thread(target=start_controller, daemon=True).start()
 threading.Thread(
-    target=start_gui_2.start_server,
+    target=start_gui.start_server,
     kwargs={"logger": logger},
     daemon=True,
 ).start()
