@@ -312,7 +312,7 @@ logger.info("モーターの動作確認が完了しました")
 # スレッド起動
 threading.Thread(target=start_controller, daemon=True).start()
 threading.Thread(
-    target=start_gui.start_server,
+    target=start_gui_2.start_server,
     kwargs={"logger": logger},  # ← logger を GUI 側に渡す
     daemon=True,
 ).start()
