@@ -47,7 +47,7 @@ logger.info("importing libraries")
 from gpiozero import Motor
 from picamera2 import Picamera2
 from pyPS4Controller.controller import Controller
-import start_gui
+import start_gui_2
 logger.info("libraries imported")
 
 # =============================
@@ -335,7 +335,7 @@ motor_init()
 
 threading.Thread(target=start_controller, daemon=True).start()
 threading.Thread(
-    target=start_gui.start_server,
+    target=start_gui_2.start_server,
     kwargs={"logger": logger},
     daemon=True,
 ).start()
