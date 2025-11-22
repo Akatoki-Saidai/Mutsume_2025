@@ -51,7 +51,7 @@ from gpiozero import Motor
 from picamera2 import Picamera2
 import evdev
 from evdev import ecodes
-import start_gui
+import start_gui_2
 logger.info("ライブラリのインポート完了")
 
 # =============================
