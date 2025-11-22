@@ -12,13 +12,13 @@ os.chdir(os.path.dirname(__file__))
 
 # ログファイル初期化
 try:
-    os.remove('print.txt')
-    os.remove('fm.log')
+    os.remove("print.txt")
+    os.remove("fm.log")
 except Exception:
     pass
 
 # 標準出力をファイルに逃がす
-sys.stdout = open('print.txt', 'w')
+sys.stdout = open("print.txt", "w")
 
 # ロガー設定
 logger = getLogger(__name__)
@@ -30,33 +30,29 @@ s_handler.setLevel(DEBUG)
 logger.addHandler(s_handler)
 
 tsv_format = Formatter(
-    '%(asctime)s.%(msecs)d+09:00\t%(name)s\t%(filename)s\t%(lineno)d\t%(funcName)s\t%(levelname)s\t%(message)s',
-    '%Y-%m-%dT%H:%M:%S'
+    "%(asctime)s.%(msecs)d+09:00\t%(name)s\t%(filename)s\t%(lineno)d\t%(funcName)s\t%(levelname)s\t%(message)s",
+    "%Y-%m-%dT%H:%M:%S",
 )
-f_handler = RotatingFileHandler('fm.log', maxBytes=100 * 1000)
+f_handler = RotatingFileHandler("fm.log", maxBytes=100 * 1000)
 f_handler.setLevel(DEBUG)
 f_handler.setFormatter(tsv_format)
 logger.addHandler(f_handler)
 
-logger.info('セットアップを開始します')
+logger.info("セットアップを開始します")
 
 # 仮想環境チェック
 if sys.prefix == sys.base_prefix:
-    logger.warning('<<警告>>\n仮想環境ではありません')
+    logger.warning("<<警告>>\n仮想環境ではありません")
     time.sleep(5)
 
 # ==== ライブラリ ====
-logger.info('ライブラリをインポートしています')
+logger.info("ライブラリをインポートしています")
 from gpiozero import Motor
 from picamera2 import Picamera2
 import evdev
 from evdev import ecodes
 import start_gui
-
-# ★ GUI 側で使う logger をここで注入 ★
-start_gui.logger = logger
-
-logger.info('ライブラリのインポート完了')
+logger.info("ライブラリのインポート完了")
 
 # =============================
 # モーター
@@ -138,7 +134,7 @@ def audio_play(path):
     if proces_aplay is None or proces_aplay.poll() is not None:
         proces_aplay = subprocess.Popen(
             f"aplay --device=hw:1,0 {path}",
-            shell=True
+            shell=True,
         )
         logger.info("音声再生開始")
     else:
@@ -181,7 +177,6 @@ def start_controller():
             for event in device.read_loop():
                 # アナログスティック
                 if event.type == ecodes.EV_ABS:
-
                     # 左スティック Y（前後）
                     if event.code == ecodes.ABS_Y:
                         last_controll_time = time.time()
@@ -253,24 +248,24 @@ def read_from_gui():
         return
 
     try:
-        with open('data_from_browser.json') as f:
+        with open("data_from_browser.json") as f:
             d = json.load(f)
         # GUI 側から直接モータ値を上書きするモード
-        motor_left.value = float(d['motor_l'])
-        motor_right.value = float(d['motor_r'])
+        motor_left.value = float(d["motor_l"])
+        motor_right.value = float(d["motor_r"])
     except Exception:
         pass
 
 
 def write_to_gui():
     try:
-        with open('data_to_browser.json') as f:
+        with open("data_to_browser.json") as f:
             d = json.load(f)
-        d['motor_l'] = motor_left.value
-        d['motor_r'] = motor_right.value
-        d['light'] = False
-        d['buzzer'] = False
-        with open('data_to_browser.json', 'w') as f:
+        d["motor_l"] = motor_left.value
+        d["motor_r"] = motor_right.value
+        d["light"] = False
+        d["buzzer"] = False
+        with open("data_to_browser.json", "w") as f:
             f.write(json.dumps(d))
     except Exception:
         pass
@@ -316,7 +311,11 @@ logger.info("モーターの動作確認が完了しました")
 
 # スレッド起動
 threading.Thread(target=start_controller, daemon=True).start()
-threading.Thread(target=start_gui.start_server, daemon=True).start()
+threading.Thread(
+    target=start_gui.start_server,
+    kwargs={"logger": logger},  # ← logger を GUI 側に渡す
+    daemon=True,
+).start()
 threading.Thread(target=update_gui, daemon=True).start()
 threading.Thread(target=start_camera, daemon=True).start()
 
