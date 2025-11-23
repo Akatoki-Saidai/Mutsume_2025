@@ -54,8 +54,8 @@ logger.info("libraries imported")
 # motors (same as your MyController)
 # =============================
 
-PIN_AIN1 = 2
-PIN_AIN2 = 3
+PIN_AIN1 = 3
+PIN_AIN2 = 2
 PIN_BIN1 = 17
 PIN_BIN2 = 27
 
